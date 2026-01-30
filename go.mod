@@ -1,0 +1,3 @@
+module lab-exporter
+
+go 1.22.1
