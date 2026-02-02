@@ -1,43 +1,64 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"time"
+
+	"go-custom-exporter/internal/app"
+	"go-custom-exporter/internal/proc"
+	"go-custom-exporter/internal/redis"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-const (
-	listenAddr = ":9200"
-	version    = "dev"
-)
-
-func metricsHandler(w http.ResponseWriter, r *http.Request) {
-	// Prometheus text exposition format
-	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-
-	// Exporter health metric
-	fmt.Fprintln(w, "# HELP os_exporter_up 1 if the exporter is running")
-	fmt.Fprintln(w, "# TYPE os_exporter_up gauge")
-	fmt.Fprintln(w, "os_exporter_up 1")
-
-	// Build information metric (useful for debugging deployments)
-	fmt.Fprintln(w, "# HELP os_exporter_build_info Build information")
-	fmt.Fprintln(w, "# TYPE os_exporter_build_info gauge")
-	fmt.Fprintf(w, "os_exporter_build_info{version=%q} 1\n", version)
-}
-
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
+func getenv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func main() {
-	log.Printf("os-exporter starting on %s\n", listenAddr)
+	listenAddr := getenv("EXPORTER_LISTEN", ":9200")
 
-	http.HandleFunc("/metrics", metricsHandler)
-	http.HandleFunc("/health", healthHandler)
+	sentinelAddrs := getenv("REDIS_SENTINELS", "")
+	masterName := getenv("REDIS_MASTER_NAME", "mymaster")
+	redisPassword := getenv("REDIS_PASSWORD", "") // optional
 
-	// ListenAndServe blocks forever (good for long-running services like exporters)
-	log.Fatal(http.ListenAndServe(listenAddr, nil))
+	log.Printf("config: listen=%q sentinels=%q masterName=%q\n", listenAddr, sentinelAddrs, masterName)
+
+	// OS metrics
+	prometheus.MustRegister(proc.NewCPUCollector(1 * time.Second))
+	prometheus.MustRegister(proc.NewMemCollector())
+	prometheus.MustRegister(proc.NewLoadCollector())
+	prometheus.MustRegister(proc.NewUptimeCollector())
+	prometheus.MustRegister(proc.NewNetCollector())
+
+	// Sentinel-aware Redis metrics
+	if sentinelAddrs == "" {
+		log.Println("WARN: REDIS_SENTINELS is empty; sentinel metrics disabled")
+	} else {
+		prometheus.MustRegister(
+			redis.NewSentinelMasterInfoCollector(sentinelAddrs, masterName, redisPassword, 5*time.Second),
+		)
+		log.Println("sentinel collector registered")
+	}
+
+	// App metrics (stub for now)
+	appMetrics := app.NewAppMetrics()
+	appMetrics.Register()
+
+	// HTTP
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	log.Printf("go-custom-exporter listening on %s\n", listenAddr)
+	log.Fatal(http.ListenAndServe(listenAddr, mux))
 }
