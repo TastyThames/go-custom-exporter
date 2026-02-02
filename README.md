@@ -46,10 +46,12 @@ auto-scaling environments.
 go run ./cmd/exporter
 
 ## Run with Docker
+```
 
 ```bash
 docker run --rm -p 9200:9200 \
   ghcr.io/tastythames/go-custom-exporter:latest
+```
 
 ## Run with Redis Sentinel 
 
@@ -60,6 +62,7 @@ docker run -d \
   -e REDIS_SENTINELS="ip1:26379,ip2:26379,ip3:26379" \
   -e REDIS_MASTER_NAME="mymaster" \
   ghcr.io/tastythames/go-custom-exporter:latest
+```
 
 ---
 
@@ -73,6 +76,7 @@ scrape_configs:
     file_sd_configs:
       - files:
           - /etc/prometheus/web_targets.json
+```
 
 ---
 
@@ -90,3 +94,4 @@ Web VM (Auto Scaling)
 obs-1
 ├─ Prometheus
 └─ Grafana
+```
